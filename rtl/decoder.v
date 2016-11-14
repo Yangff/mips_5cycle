@@ -100,12 +100,14 @@ module decoder(
 	  endcase
 	end
 
-	always @(reset) begin
-		dc_ins <= 0;
-		dc_stage <= 0;
-		// currents
-		mem_data_current <= 0; 
-		alu_result_current <= 0; 
+	always @(posedge reset) begin
+		if (reset) begin
+			dc_ins <= 0;
+			dc_stage <= 0;
+			// currents
+			mem_data_current <= 0; 
+			alu_result_current <= 0; 
+		end
 	end
 
 	// control signals
