@@ -6,7 +6,7 @@ module byte_op(org, pos, val, result);
 	input [3:0] pos; // SIGNED MIX/FETCH POS
 	input [7:0] val;
 
-	output [31:0] result;
+	output reg [31:0] result;
 
 	always @(*) begin
 		result = 0;

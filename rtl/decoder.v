@@ -31,6 +31,31 @@ module decoder(
 	
 );
 
+	/// Defines & Assignments
+	input clk;
+	input reset;
+
+	input [31:0] ins;
+
+	output reg [31:0] pc;
+
+	/* ALU In */
+	input [31:0] alu_result; input [3:0] alu_flags; //  
+	/* ALU Control Out */
+	output reg [3:0] alu_op; output reg [1:0] alu_mask; /* 00 all reg, 01/10 (a, b) reg + imm, 11 forbidden */
+	output reg [31:0] alu_imm1; output reg [31:0] alu_imm0;
+
+	/* Memory In */
+	input [31:0] mem_data;
+	/* Memory Out */
+	output reg [31:0] mem_addr; output reg mem_write_en; output reg[31:0] mem_write_data;
+
+	/* Register In */
+	input [31:0] reg_rs_data; input [31:0] reg_rt_data;
+	/* Register Out */
+	output reg [4:0] reg_rs; output reg [4:0] reg_rt; output reg [4:0] reg_rd;
+	output reg [31:0] reg_rd_data; output reg reg_write_en;
+
 	parameter   FETCH   = 4'b0000; // State 0
 	parameter   DECODE  = 4'b0001; // State 1
 	parameter   MEMADR  = 4'b0010;	// State 2
@@ -76,11 +101,12 @@ module decoder(
 		end
 		MEMADR: begin
 			alu_result_current <= alu_result;
-			dc_stage <= dc_stage_next
+			dc_stage <= dc_stage_next;
 		end
-		MEMRD: 
+		MEMRD: begin
 			dc_stage <= dc_stage_next;
 			mem_data_current <= mem_data;
+		end
 		MEMWB:
 			dc_stage <= 0;
 		MEMWR:
@@ -131,7 +157,7 @@ module decoder(
 		mem_addr = 0; mem_write_en = 0; mem_write_data = 0;
 		reg_rs = dc_reg_s; reg_rt = dc_reg_t; reg_rd = dc_reg_d;
 		reg_rd_data = 0; reg_write_en = 0; dc_stage_next = 0;
-
+		by_pos = 0; hl_pos = 0;
 		case (dc_stage)
 		  FETCH: begin
 		  	alu_mask = 2'b11; alu_imm1 = pc; alu_imm0 = 4; alu_op = 0; mem_addr = pc; 
@@ -151,7 +177,7 @@ module decoder(
 				dc_stage_next = BTYPEEX;
 				alu_mask = 2'b11; alu_imm1 = pc; alu_imm0 = extension_16_addr; alu_op = 4'b1011; // a + b - 4
 			end
-			if (dc_ins_j) begin
+			if (dc_ins_j) 
 				dc_stage_next = JEX;
 			if (dc_ins_jal | dc_ins_jalr)
 				dc_stage_next = JWRITE;
@@ -181,10 +207,10 @@ module decoder(
 		  		reg_rd_data = mem_data_current;
 		  	else begin
 			  	if (dc_ins_lb | dc_ins_lbu) begin
-				  	by_pos = {dc_ins_lb, 1'b0, alu_result_current[1:0]}
+				  	by_pos = {dc_ins_lb, 1'b0, alu_result_current[1:0]};
 					reg_rd_data = result_b;
 				end else begin
-					hl_pos = {dc_ins_lh, 1'b0, alu_result_current[1]}
+					hl_pos = {dc_ins_lh, 1'b0, alu_result_current[1]};
 					reg_rd_data = result_h;
 				end
 		  	end 
@@ -197,10 +223,10 @@ module decoder(
 		  		mem_write_data = reg_rt_data;
 		  	else begin
 			  	if (dc_ins_sb) begin
-				  	by_pos = {1'b0, 1'b1, alu_result_current[1:0]}
+				  	by_pos = {1'b0, 1'b1, alu_result_current[1:0]};
 					mem_write_data = result_b;
 				end else begin
-					hl_pos = {1'b0, 1'b1, alu_result_current[1]}
+					hl_pos = {1'b0, 1'b1, alu_result_current[1]};
 					mem_write_data = result_h;
 				end
 		  	end
@@ -210,12 +236,12 @@ module decoder(
 		  	alu_op = dc_rr_alu_op;
 			if (dc_ins_sll | dc_ins_srl | dc_ins_sra) begin
 				alu_mask = 2'b10;
-				alu_imm1 = {{27{x}}, dc_smt};
+				alu_imm1 = {27'bx, dc_smt};
 			end else alu_mask = 2'b00;
 		  end
 		  RTYPEWB: begin
 		  	if ((alu_flags[1] | alu_flags[0]) & (dc_ins_add | dc_ins_sub))
-			  	$display("Overflow Happened, nothing written");
+			  	$display("Overflow Happened, nothing written.\n");
 			else begin
 				reg_rd = dc_reg_d;
 				reg_rd_data = alu_result_current;
@@ -231,17 +257,17 @@ module decoder(
 			end else begin
 				alu_mask = 2'b01;
 				alu_imm0 = 0; // a - 0 
-				branch_happen = (dc_type_be & alu_flags[2]) | (dc_type_gt ^ alu_flags[3]) // gt differ from ne
+				branch_happen = (dc_type_be & alu_flags[2]) | (dc_type_gt ^ alu_flags[3]); // gt differ from ne
 			end
 		  end
 		  ITYPEEX: begin
 		  	alu_op = dc_ri_alu_op;
-			alu_mask = 2'01;
+			alu_mask = 2'b01;
 			alu_imm0 = dc_ri_signed_extension ? (extension_signed_16) : (dc_ri_high_extension ? extension_high_16 : extension_zero_16);
 		  end
 		  ITYPEWB: begin
 			if ((alu_flags[1] | alu_flags[0]) & (dc_ins_addi))
-				$display("Overflow Happened, nothing written");
+				$display("Overflow Happened, nothing written.\n");
 			else begin
 				reg_rd = dc_reg_d;
 				reg_rd_data = alu_result_current;
@@ -266,22 +292,14 @@ module decoder(
 
 	/// half & byte ops
 
-	half_op hf(mem_data_current, hl_pos, reg_rt_data[7:0], result_h);
-	byte_op hf(mem_data_current, by_pos, reg_rt_data[7:0], result_b);
+	reg [2:0] hl_pos;
+	reg [3:0] by_pos;
+	wire[31:0] result_h;
+	wire[31:0] result_b;
+	half_op hf(mem_data_current, hl_pos, reg_rt_data[15:0], result_h);
+	byte_op bf(mem_data_current, by_pos, reg_rt_data[7:0], result_b);
 
-	wire [2:0] hl_pos;
-	wire [3:0] by_pos;
 
-	wire [31:0] result_h;
-	wire [31:0] result_b;
-
-	/// Defines & Assignments
-	input clk;
-	input reset;
-
-	input [31:0] ins;
-
-	output [31:0] pc;
 
 	wire [5:0] dc_op;
 	
@@ -299,7 +317,13 @@ module decoder(
 	wire [31:0] extension_high_16;
 	wire [31:0] extension_16_addr;
 
-	wire [3:0] dc_stage_next; 
+    assign extension_26 = {{4{dc_ins[25]}}, dc_ins[25:0], 2'b00};
+	assign extension_signed_16 = {{16{dc_ins[15]}}, dc_ins[15:0]};
+	assign extension_zero_16 = {16'b0, dc_ins[15:0]};
+	assign extension_high_16 = {dc_ins[15:0], 16'b0};
+    assign extension_16_addr = {{14{dc_ins[15]}}, dc_ins[15:0], 2'b00};
+
+	reg [3:0] dc_stage_next; 
 
 	// 加载
 	wire dc_ins_lb;
@@ -332,7 +356,7 @@ module decoder(
 	wire dc_ins_nor;
 	wire dc_type_r;
 
-	wire [3:0] dc_rr_alu_op;
+	reg [3:0] dc_rr_alu_op;
 
 	// R-I运算
 	wire dc_ins_addi;
@@ -345,7 +369,7 @@ module decoder(
 	wire dc_ins_sltiu;
 	wire dc_type_i;
 
-	wire [3:0] dc_ri_alu_op;
+	reg [3:0] dc_ri_alu_op;
 
 	// 分支
 	wire dc_ins_beq;
@@ -357,7 +381,7 @@ module decoder(
 	wire dc_type_b;
 	wire dc_type_be;
 	wire dc_type_gt;
-	wire branch_happen;
+	reg branch_happen;
 	// 跳转
 	wire dc_ins_j;
 	wire dc_ins_jal;
@@ -404,7 +428,7 @@ module decoder(
 	assign dc_ins_nor = (dc_op == 6'b000000) & (dc_funt == 6'b100111) ?1'b1:1'b0;
 	assign dc_type_r = dc_ins_add | dc_ins_addu | dc_ins_sub | dc_ins_subu | dc_ins_slt | dc_ins_sltu | dc_ins_sll | dc_ins_srl | dc_ins_sra | dc_ins_sllv | dc_ins_srlv | dc_ins_srav | dc_ins_and | dc_ins_or | dc_ins_xor | dc_ins_nor;
 
-	always @(*) begin
+	always @* begin
 		dc_rr_alu_op = 4'b1111;
 		if (dc_ins_add | dc_ins_addu)
 			dc_rr_alu_op = 4'b0000;
@@ -444,7 +468,7 @@ module decoder(
 	assign dc_ri_signed_extension = (dc_ins_addi | dc_ins_addiu | dc_ins_slti | dc_ins_sltiu);
 	assign dc_ri_high_extension = dc_ins_lui;
 
-	always @(*) begin
+	always @* begin
 		dc_ri_alu_op = 4'b1111;
 		if (dc_ins_addi | dc_ins_addiu)
 			dc_ri_alu_op = 4'b0000;
