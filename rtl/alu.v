@@ -29,14 +29,16 @@ module alu(
 	  	case (op)
         	4'b0000: c = mux_a + mux_b; 
         	4'b0001: c = mux_a - mux_b;
-        	4'b0010: c = mux_a << mux_b;
-        	4'b0011: c = mux_a >> mux_b;
-			4'b0100: c = $signed(mux_a) >>> mux_b; 
+        	4'b0010: c = mux_b << mux_a[4:0];
+        	4'b0011: c = mux_b >> mux_a[4:0];
+			4'b0100: c = $signed(mux_b) >>> mux_a[4:0]; 
         	4'b0101: c = mux_a & mux_b;
         	4'b0110: c = mux_a | mux_b;
-        	4'b0111: c = mux_a ^ mux_b;    
-        	4'b1000: c = (mux_a < mux_b) ? 32'b1 : 32'b0; // sltu
-        	4'b1001: c = ($signed(mux_a) < $signed(mux_b)) ? 32'b1 : 32'b0; // slt
+        	4'b0111: c = mux_a ^ mux_b;
+			4'b1000: c = mux_a ~^ mux_b;    
+        	4'b1001: c = (mux_a < mux_b) ? 32'b1 : 32'b0; // sltu
+        	4'b1010: c = ($signed(mux_a) < $signed(mux_b)) ? 32'b1 : 32'b0; // slt
+			4'b1011: c = mux_a + mux_b - 4;
        		default: c = 0;
 		endcase
 	end

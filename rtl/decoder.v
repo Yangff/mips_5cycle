@@ -42,10 +42,9 @@ module decoder(
 	parameter   BTYPEEX = 4'b1000;	// State 8
 	parameter   ITYPEEX = 4'b1001;	// State 9
 	parameter   ITYPEWB = 4'b1010;	// state 10
-	parameter   JWRITE  = 4'b1011;	// State 11 (write then read)
-	parameter   JREAD   = 4'b1100;	// State 12 (write then read)
-	parameter   JREX     = 4'b1101;	// State 13 (addred from register)
-	parameter   JEX     = 4'b1110;	// State 14
+	parameter   JWRITE  = 4'b1011;	// State 11 (write when read)
+	parameter   JREAD  = 4'b1100;	// State 12 (read)
+	parameter   JEX     = 4'b1101;	// State 13
 	
 	// decoder
 	reg [31:0] dc_ins;
@@ -86,10 +85,25 @@ module decoder(
 			dc_stage <= 0;
 		MEMWR:
 			dc_stage <= 0;
+		RTYPEEX: begin
+			dc_stage <= RTYPEWB;
+			alu_result_current <= alu_result;
+		end
+		RTYPEWB: 
+			dc_stage <= 0;
 		BTYPEEX: begin 
 			if (branch_happen == 1)
 				pc <= alu_result_current;
 			dc_stage <= 0;
+		end
+		ITYPEWB: 
+			dc_stage <= 0;
+		JWRITE: begin
+			dc_stage <= dc_stage_next;
+		end
+		JREAD: begin
+			dc_stage <= 0;
+			pc <= reg_rs_data;
 		end
 		JEX: 
 			pc <= extension_26;
@@ -135,16 +149,18 @@ module decoder(
 			
 			if (dc_type_b) begin
 				dc_stage_next = BTYPEEX;
-				alu_mask = 2'b11; alu_imm1 = pc; alu_imm0 = extension_16_addr; alu_op = ?; // a + b - 4
+				alu_mask = 2'b11; alu_imm1 = pc; alu_imm0 = extension_16_addr; alu_op = 4'b1011; // a + b - 4
 			end
-
 			if (dc_ins_j) begin
 				dc_stage_next = JEX;
-			end
+			if (dc_ins_jal | dc_ins_jalr)
+				dc_stage_next = JWRITE;
+			if (dc_ins_jr)
+				dc_stage_next = JREAD;
 		  end
 		  MEMADR: begin
 		  	alu_mask = 2'b01;
-		  	alu_imm1 = extension_16;
+		  	alu_imm0 = extension_signed_16;
 		  	alu_op = 0;
 		  	if (dc_ins_sw)
 		  		dc_stage_next = MEMWR;
@@ -164,7 +180,13 @@ module decoder(
 		  	if (dc_ins_lw)
 		  		reg_rd_data = mem_data_current;
 		  	else begin
-		  		// calc mixed data
+			  	if (dc_ins_lb | dc_ins_lbu) begin
+				  	by_pos = {dc_ins_lb, 1'b0, alu_result_current[1:0]}
+					reg_rd_data = result_b;
+				end else begin
+					hl_pos = {dc_ins_lh, 1'b0, alu_result_current[1]}
+					reg_rd_data = result_h;
+				end
 		  	end 
 		  	reg_write_en = 1;
 		  end
@@ -172,11 +194,33 @@ module decoder(
 		  	// Reg -> Mem
 		  	mem_addr = alu_result_current;
 		  	if (dc_ins_sw)
-		  		mem_write_data = mem_data_current;
+		  		mem_write_data = reg_rt_data;
 		  	else begin
-		  		// calc mixed data
+			  	if (dc_ins_sb) begin
+				  	by_pos = {1'b0, 1'b1, alu_result_current[1:0]}
+					mem_write_data = result_b;
+				end else begin
+					hl_pos = {1'b0, 1'b1, alu_result_current[1]}
+					mem_write_data = result_h;
+				end
 		  	end
 		  	mem_write_en = 1;
+		  end
+		  RTYPEEX: begin
+		  	alu_op = dc_rr_alu_op;
+			if (dc_ins_sll | dc_ins_srl | dc_ins_sra) begin
+				alu_mask = 2'b10;
+				alu_imm1 = {{27{x}}, dc_smt};
+			end else alu_mask = 2'b00;
+		  end
+		  RTYPEWB: begin
+		  	if ((alu_flags[1] | alu_flags[0]) & (dc_ins_add | dc_ins_sub))
+			  	$display("Overflow Happened, nothing written");
+			else begin
+				reg_rd = dc_reg_d;
+				reg_rd_data = alu_result_current;
+				reg_write_en = 1;
+			end
 		  end
 		  BTYPEEX: begin
 		  	// determine by command
@@ -190,8 +234,46 @@ module decoder(
 				branch_happen = (dc_type_be & alu_flags[2]) | (dc_type_gt ^ alu_flags[3]) // gt differ from ne
 			end
 		  end
+		  ITYPEEX: begin
+		  	alu_op = dc_ri_alu_op;
+			alu_mask = 2'01;
+			alu_imm0 = dc_ri_signed_extension ? (extension_signed_16) : (dc_ri_high_extension ? extension_high_16 : extension_zero_16);
+		  end
+		  ITYPEWB: begin
+			if ((alu_flags[1] | alu_flags[0]) & (dc_ins_addi))
+				$display("Overflow Happened, nothing written");
+			else begin
+				reg_rd = dc_reg_d;
+				reg_rd_data = alu_result_current;
+				reg_write_en = 1;
+			end
+		  end
+		  JWRITE: begin
+		  	reg_rd = dc_ins_jal ? (31) : dc_reg_d;
+			reg_rd_data = pc;
+			reg_write_en = 1;
+			dc_stage_next = dc_ins_jal ? JEX : JREAD; // jalr
+		  end
+		  JREAD: begin
+		  	reg_rs = dc_reg_s;
+		  end
+		  JEX: begin
+		  	// nop
+			// - can be opt by reduce this code
+		  end
 		endcase
 	end
+
+	/// half & byte ops
+
+	half_op hf(mem_data_current, hl_pos, reg_rt_data[7:0], result_h);
+	byte_op hf(mem_data_current, by_pos, reg_rt_data[7:0], result_b);
+
+	wire [2:0] hl_pos;
+	wire [3:0] by_pos;
+
+	wire [31:0] result_h;
+	wire [31:0] result_b;
 
 	/// Defines & Assignments
 	input clk;
@@ -211,11 +293,10 @@ module decoder(
 
 	wire [5:0] dc_funt;
 
-	wire [25:0] dc_immj;
-	wire [15:0] dc_immi;
-
 	wire [31:0] extension_26;
-	wire [31:0] extension_16;
+	wire [31:0] extension_signed_16;
+	wire [31:0] extension_zero_16;
+	wire [31:0] extension_high_16;
 	wire [31:0] extension_16_addr;
 
 	wire [3:0] dc_stage_next; 
@@ -250,6 +331,9 @@ module decoder(
 	wire dc_ins_xor;
 	wire dc_ins_nor;
 	wire dc_type_r;
+
+	wire [3:0] dc_rr_alu_op;
+
 	// R-I运算
 	wire dc_ins_addi;
 	wire dc_ins_addiu;
@@ -260,6 +344,9 @@ module decoder(
 	wire dc_ins_slti;
 	wire dc_ins_sltiu;
 	wire dc_type_i;
+
+	wire [3:0] dc_ri_alu_op;
+
 	// 分支
 	wire dc_ins_beq;
 	wire dc_ins_bne;
@@ -316,16 +403,65 @@ module decoder(
 	assign dc_ins_xor = (dc_op == 6'b000000) & (dc_funt == 6'b100110) ?1'b1:1'b0;
 	assign dc_ins_nor = (dc_op == 6'b000000) & (dc_funt == 6'b100111) ?1'b1:1'b0;
 	assign dc_type_r = dc_ins_add | dc_ins_addu | dc_ins_sub | dc_ins_subu | dc_ins_slt | dc_ins_sltu | dc_ins_sll | dc_ins_srl | dc_ins_sra | dc_ins_sllv | dc_ins_srlv | dc_ins_srav | dc_ins_and | dc_ins_or | dc_ins_xor | dc_ins_nor;
+
+	always @(*) begin
+		dc_rr_alu_op = 4'b1111;
+		if (dc_ins_add | dc_ins_addu)
+			dc_rr_alu_op = 4'b0000;
+		if (dc_ins_sub | dc_ins_subu)
+			dc_rr_alu_op = 4'b0001;
+		if (dc_ins_slt)
+			dc_rr_alu_op = 4'b1010;
+		if (dc_ins_sltu)
+			dc_rr_alu_op = 4'b1001;
+		if (dc_ins_sll | dc_ins_sllv)
+			dc_rr_alu_op = 4'b0010;
+		if (dc_ins_srl | dc_ins_srlv)
+			dc_rr_alu_op = 4'b0011;
+		if (dc_ins_sra | dc_ins_srav)
+			dc_rr_alu_op = 4'b0011;
+		if (dc_ins_and)
+			dc_rr_alu_op = 4'b0101;
+		if (dc_ins_or)
+			dc_rr_alu_op = 4'b0110;
+		if (dc_ins_xor)
+			dc_rr_alu_op = 4'b0111;
+		if (dc_ins_nor)
+			dc_rr_alu_op = 4'b1000;
+	end
+
 	// R-I运算
 	assign dc_ins_addi = dc_op == 6'b001000 ?1'b1:1'b0;
 	assign dc_ins_addiu = dc_op == 6'b001001 ?1'b1:1'b0;
 	assign dc_ins_andi = dc_op == 6'b001100 ?1'b1:1'b0;
 	assign dc_ins_ori = dc_op == 6'b001101 ?1'b1:1'b0;
 	assign dc_ins_xori = dc_op == 6'b001110 ?1'b1:1'b0;
-	assign dc_ins_lui = dc_op == 6'b001111 ?1'b1:1'b0;
+	assign dc_ins_lui = dc_op == 6'b001111 ?1'b1:1'b0; // [SPECIAL] high_extension
 	assign dc_ins_slti = dc_op == 6'b001010 ?1'b1:1'b0;
 	assign dc_ins_sltiu = dc_op == 6'b001011 ?1'b1:1'b0;
 	assign dc_type_i = dc_ins_addi | dc_ins_addiu | dc_ins_andi | dc_ins_ori | dc_ins_xori | dc_ins_lui | dc_ins_slti | dc_ins_sltiu;
+
+	assign dc_ri_signed_extension = (dc_ins_addi | dc_ins_addiu | dc_ins_slti | dc_ins_sltiu);
+	assign dc_ri_high_extension = dc_ins_lui;
+
+	always @(*) begin
+		dc_ri_alu_op = 4'b1111;
+		if (dc_ins_addi | dc_ins_addiu)
+			dc_ri_alu_op = 4'b0000;
+		if (dc_ins_andi)
+			dc_ri_alu_op = 4'b0101;
+		if (dc_ins_ori)
+			dc_ri_alu_op = 4'b0110;
+		if (dc_ins_xori)
+			dc_ri_alu_op = 4'b0111;
+		if (dc_ins_lui)
+			dc_ri_alu_op = 4'b1111;
+		if (dc_ins_slti)
+			dc_ri_alu_op = 4'b1010;
+		if (dc_ins_sltiu)
+			dc_ri_alu_op = 4'b1001;
+	end
+
 	// 分支
 	assign dc_ins_beq = dc_op == 6'b000100 ?1'b1:1'b0; // a==b
 	assign dc_ins_bne = dc_op == 6'b000101 ?1'b1:1'b0; // a!=b
