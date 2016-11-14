@@ -4,7 +4,6 @@
 
    OUTPUT:
    	* Control Signal
-   	* Next Stage
 */
 module decoder(
 	/* System In */
@@ -32,9 +31,29 @@ module decoder(
 	
 );
 
+	parameter   FETCH   = 4'b0000; // State 0
+	parameter   DECODE  = 4'b0001; // State 1
+	parameter   MEMADR  = 4'b0010;	// State 2
+	parameter   MEMRD   = 4'b0011;	// State 3
+	parameter   MEMWB   = 4'b0100;	// State 4
+	parameter   MEMWR   = 4'b0101;	// State 5
+	parameter   RTYPEEX = 4'b0110;	// State 6
+	parameter   RTYPEWB = 4'b0111;	// State 7
+	parameter   BTYPEEX = 4'b1000;	// State 8
+	parameter   ITYPEEX = 4'b1001;	// State 9
+	parameter   ITYPEWB = 4'b1010;	// state 10
+	parameter   JREAD   = 4'b1011;	// State 11
+	parameter   JWRITE  = 4'b1100;	// State 12
+	parameter   JREX     = 4'b1101;	// State 13 (addred from register)
+	parameter   JEX     = 4'b1110;	// State 14
+	
 	// decoder
 	reg [31:0] dc_ins;
 	reg [3:0] dc_stage;
+
+	// saved value
+	reg [31:0] alu_result_current;
+	reg [31:0] mem_data_current;
 
 	/// Logic
 
@@ -43,10 +62,40 @@ module decoder(
 	always @(negedge clk) begin
 	  // State Machine
 	  case (dc_stage)
-		4'b0000: begin // fetch
+		FETCH: begin // fetch
+			// init
+			mem_data_current <= 0; 
+			alu_result_current <= 0;
+
 			dc_ins <= mem_data;
 			pc <= alu_result;
-			dc_stage <= 4'b0001; 
+			dc_stage <= DECODE;
+		end
+		DECODE: begin
+			alu_result_current <= alu_result;
+			dc_stage <= dc_stage_next;
+		end
+		MEMADR: begin
+			alu_result_current <= alu_result;
+			dc_stage <= dc_stage_next
+		end
+		MEMRD: 
+			dc_stage <= dc_stage_next;
+			mem_data_current <= mem_data;
+		MEMWB:
+			dc_stage <= 0;
+		MEMWR:
+			dc_stage <= 0;
+		BTYPEEX: begin 
+			if (branch_happen == 1)
+				pc <= alu_result_current;
+			dc_stage <= 0;
+		end
+		JEX: 
+			pc <= extension_26;
+		default: begin
+			$display("Error Occurs, unexpected stage!\n");
+			dc_stage <= 0;
 		end
 	  endcase
 	end
@@ -54,6 +103,9 @@ module decoder(
 	always @(reset) begin
 		dc_ins <= 0;
 		dc_stage <= 0;
+		// currents
+		mem_data_current <= 0; 
+		alu_result_current <= 0; 
 	end
 
 	// control signals
@@ -62,18 +114,82 @@ module decoder(
 		alu_op = 0;	alu_mask = 0; alu_imm1 = 0; alu_imm0 = 0; 
 		mem_addr = 0; mem_write_en = 0; mem_write_data = 0;
 		reg_rs = dc_reg_s; reg_rt = dc_reg_t; reg_rd = dc_reg_d;
-		reg_rd_data = 0; reg_write_en = 0;
+		reg_rd_data = 0; reg_write_en = 0; dc_stage_next = 0;
+
 		case (dc_stage)
-		  4'b0000: begin
-		  	alu_mask = 2'b11; alu_imm1 = pc; alu_imm0 = 4; mem_addr = pc; 
+		  FETCH: begin
+		  	alu_mask = 2'b11; alu_imm1 = pc; alu_imm0 = 4; alu_op = 0; mem_addr = pc; 
 		  end
-		  4'b0001: begin
+		  DECODE: begin
 		  	// decoder
+			if (dc_type_load | dc_type_save) 
+				dc_stage_next = MEMADR;
 			
+			if (dc_type_r) 
+				dc_stage_next = RTYPEEX;
+			
+			if (dc_type_i) 
+				dc_stage_next = ITYPEEX;
+			
+			if (dc_type_b) begin
+				dc_stage_next = BTYPEEX;
+				alu_mask = 2'b11; alu_imm1 = pc; alu_imm0 = extension_16_addr; alu_op = ?; // a + b - 4
+			end
+
+			if (dc_ins_j) begin
+				dc_stage_next = JEX;
+			end
+		  end
+		  MEMADR: begin
+		  	alu_mask = 2'b01;
+		  	alu_imm1 = extension_16;
+		  	alu_op = 0;
+		  	if (dc_ins_sw)
+		  		dc_stage_next = MEMWR;
+		  	else
+		  		dc_stage_next = MEMRD;
+		  end
+		  MEMRD: begin
+		  	mem_addr = alu_result_current;
+		  	if (dc_type_load)
+		  		dc_stage_next = MEMWB;
+		  	if (dc_type_save)
+		  		dc_stage_next = MEMWR;
+		  end
+		  MEMWB: begin
+		  	// Mem -> Reg
+		  	reg_rd = dc_reg_t;
+		  	if (dc_ins_lw)
+		  		reg_rd_data = mem_data_current;
+		  	else begin
+		  		// calc mixed data
+		  	end 
+		  	reg_write_en = 1;
+		  end
+		  MEMWR: begin
+		  	// Reg -> Mem
+		  	mem_addr = alu_result_current;
+		  	if (dc_ins_sw)
+		  		mem_write_data = mem_data_current;
+		  	else begin
+		  		// calc mixed data
+		  	end
+		  	mem_write_en = 1;
+		  end
+		  BTYPEEX: begin
+		  	// determine by command
+			alu_op = 4'b0001;
+			if (dc_ins_beq | dc_ins_bne) begin
+				alu_mask = 2'b00;
+		  		branch_happen = dc_ins_bne ^ alu_flags[2]; // zf differ from bne
+			end else begin
+				alu_mask = 2'b01;
+				alu_imm0 = 0; // a - 0 
+				branch_happen = (dc_type_be & alu_flags[2]) | (dc_type_gt ^ alu_flags[3]) // gt differ from ne
+			end
 		  end
 		endcase
 	end
-
 
 	/// Defines & Assignments
 	input clk;
@@ -82,7 +198,6 @@ module decoder(
 	input [31:0] ins;
 
 	output [31:0] pc;
-
 
 	wire [5:0] dc_op;
 	
@@ -151,6 +266,9 @@ module decoder(
 	wire dc_ins_bltz;
 	wire dc_ins_bgez;
 	wire dc_type_b;
+	wire dc_type_be;
+	wire dc_type_gt;
+	wire branch_happen;
 	// 跳转
 	wire dc_ins_j;
 	wire dc_ins_jal;
@@ -164,7 +282,7 @@ module decoder(
 	wire dc_ins_mtlo;
 
 	// decode op
-	assign dc_op = ins[31:26];
+	assign dc_op = dc_ins[31:26];
 
 	// 加载
 	assign dc_ins_lb = dc_op == 6'b100000;
@@ -207,13 +325,15 @@ module decoder(
 	assign dc_ins_sltiu = dc_op == 6'b001011;
 	assign dc_type_i = dc_ins_addi | dc_ins_addiu | dc_ins_andi | dc_ins_ori | dc_ins_xori | dc_ins_lui | dc_ins_slti | dc_ins_sltiu;
 	// 分支
-	assign dc_ins_beq = dc_op == 6'b000100;
-	assign dc_ins_bne = dc_op == 6'b000101;
-	assign dc_ins_blez = dc_op == 6'b000110;
-	assign dc_ins_bgtz = dc_op == 6'b000111;
-	assign dc_ins_bltz = (dc_op == 6'b000001) & (dc_rt == 6'b00000);
-	assign dc_ins_bgez = (dc_op == 6'b000001) & (dc_rt == 6'b00001);
+	assign dc_ins_beq = dc_op == 6'b000100; // a==b
+	assign dc_ins_bne = dc_op == 6'b000101; // a!=b
+	assign dc_ins_blez = dc_op == 6'b000110; // a <= 0
+	assign dc_ins_bgtz = dc_op == 6'b000111; // a > 0
+	assign dc_ins_bltz = (dc_op == 6'b000001) & (dc_reg_t == 5'b00000); // a < 0
+	assign dc_ins_bgez = (dc_op == 6'b000001) & (dc_reg_t == 5'b00001); // a >= 0
 	assign dc_type_b = dc_ins_beq | dc_ins_bne | dc_ins_blez | dc_ins_bgtz | dc_ins_bltz | dc_ins_bgez;
+	assign dc_type_be = dc_ins_blez | dc_ins_bgez;
+	assign dc_type_gt = dc_ins_bgtz | dc_ins_bgez;
 	// 跳转
 	assign dc_ins_j = dc_op == 6'b000010;
 	assign dc_ins_jal = dc_op == 6'b000011;

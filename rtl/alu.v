@@ -1,4 +1,5 @@
 module alu(
+	// a = rs, b = rt
 	a, b, imm1, imm0, op, mask /*ab*/,
 	result, flags
 );
@@ -9,7 +10,7 @@ module alu(
 	input [1:0] mask;
 
 	output [31:0] result;
-	output [2:0] flags;
+	output [3:0] flags;
 
 	wire [31:0] mux_a;
 	wire [31:0] mux_b;
@@ -22,7 +23,7 @@ module alu(
 	assign result = c[31:0];
 
 	//zf of uf
-	assign flags = {result == 0,  c[32:31] == 2'b01,  c[32:31] == 2'b10};
+	assign flags = {c[31], result == 0,  c[32:31] == 2'b01,  c[32:31] == 2'b10};
 
 	always @* begin
 	  	case (op)
