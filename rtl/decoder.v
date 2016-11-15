@@ -8,8 +8,6 @@
 module decoder(
 	/* System In */
 	clk, reset, 
-	/* Decoder In */
-	ins, 
 	/* Decoder Out */
 	pc,
 
@@ -27,15 +25,13 @@ module decoder(
 	reg_rs_data, reg_rt_data,
 	/* Register Out */
 	reg_rs, reg_rt, reg_rd,
-	reg_rd_data, reg_write_en,
+	reg_rd_data, reg_write_en
 	
 );
 
 	/// Defines & Assignments
 	input clk;
 	input reset;
-
-	input [31:0] ins;
 
 	output reg [31:0] pc;
 
@@ -70,7 +66,9 @@ module decoder(
 	parameter   JWRITE  = 4'b1011;	// State 11 (write when read)
 	parameter   JREAD  = 4'b1100;	// State 12 (read)
 	parameter   JEX     = 4'b1101;	// State 13
-	
+	parameter   BREAK   = 4'b1110; 
+	parameter   UNKNOWN = 4'b1111; 
+
 	// decoder
 	reg [31:0] dc_ins;
 	reg [3:0] dc_stage;
@@ -79,6 +77,8 @@ module decoder(
 	reg [31:0] alu_result_current;
 	reg [31:0] mem_data_current;
 
+	// comb
+	reg [3:0] dc_stage_next; 
 	/// Logic
 
 	// dc_stage <= dc_stage_next; iff need different path
@@ -94,47 +94,85 @@ module decoder(
 			dc_ins <= mem_data;
 			pc <= alu_result;
 			dc_stage <= DECODE;
+			$display("PC= %d, Fetched %b.", pc, mem_data);
 		end
 		DECODE: begin
 			alu_result_current <= alu_result;
 			dc_stage <= dc_stage_next;
+			$display("  Decoder done. alu=%d.", alu_result);
 		end
 		MEMADR: begin
 			alu_result_current <= alu_result;
 			dc_stage <= dc_stage_next;
+			$display("  Memlocated %x", alu_result);
 		end
 		MEMRD: begin
 			dc_stage <= dc_stage_next;
 			mem_data_current <= mem_data;
+			$display("  Mem %x=%x %x", mem_addr, mem_data);
 		end
-		MEMWB:
+		MEMWB: begin
 			dc_stage <= 0;
-		MEMWR:
+			$display("  Written %x to RegAddr:%d", reg_rd_data, reg_rd);
+		end
+		MEMWR: begin
 			dc_stage <= 0;
+			$display("  Written %x to Addr:%x", mem_write_data, mem_addr);
+		end
 		RTYPEEX: begin
 			dc_stage <= RTYPEWB;
 			alu_result_current <= alu_result;
+			$display("  Calc Result=%d", alu_result);
 		end
-		RTYPEWB: 
+		RTYPEWB: begin
 			dc_stage <= 0;
+			$display("  Written %x to RegAddr:%d", reg_rd_data, reg_rd);
+		end
 		BTYPEEX: begin 
-			if (branch_happen == 1)
+			if (branch_happen == 1) begin
 				pc <= alu_result_current;
+				$display("  BR Taken to %x", alu_result_current);
+			end
 			dc_stage <= 0;
+			$display("  BR IG");
 		end
-		ITYPEWB: 
+		ITYPEEX: begin
+			dc_stage <= ITYPEWB;
+			alu_result_current <= alu_result;
+			$display("  Calc Result=%d", alu_result);
+		end
+		ITYPEWB: begin
 			dc_stage <= 0;
+			$display("  Written %x to RegAddr:%d", reg_rd_data, reg_rd);
+		end
 		JWRITE: begin
 			dc_stage <= dc_stage_next;
+			$display("  Written %x to RegAddr:%d", reg_rd_data, reg_rd);
 		end
 		JREAD: begin
 			dc_stage <= 0;
 			pc <= reg_rs_data;
+			$display("  Read %x from RegAddr:%d", reg_rd_data, reg_rd);
 		end
-		JEX: 
+		JEX: begin
 			pc <= extension_26;
+			dc_stage <= 0;
+			$display("  Jump to %d", pc);
+		end
+		BREAK: begin
+			if (dc_ins[25:11] == 15'b0) begin
+				$display("Reg %d=%d", reg_rt, reg_rt_data);
+			end else begin
+				$display("Break due to code %d.", dc_ins[25:6]);
+				$finish;
+			end
+		end
+		UNKNOWN: begin
+			$display("Unsupported instruction %b, or finished?", dc_ins);
+			$finish;
+		end
 		default: begin
-			$display("Error Occurs, unexpected stage!\n");
+			$display("Error Occurs, unexpected stage %d!\n", dc_stage);
 			dc_stage <= 0;
 		end
 	  endcase
@@ -142,8 +180,9 @@ module decoder(
 
 	always @(posedge reset) begin
 		if (reset) begin
+			pc <= 0;
 			dc_ins <= 0;
-			dc_stage <= 0;
+			dc_stage <= 4'b0000;
 			// currents
 			mem_data_current <= 0; 
 			alu_result_current <= 0; 
@@ -164,6 +203,11 @@ module decoder(
 		  end
 		  DECODE: begin
 		  	// decoder
+
+			dc_stage_next = UNKNOWN;
+			
+			if (dc_ins_break)
+				dc_stage_next = BREAK;
 			if (dc_type_load | dc_type_save) 
 				dc_stage_next = MEMADR;
 			
@@ -269,7 +313,7 @@ module decoder(
 			if ((alu_flags[1] | alu_flags[0]) & (dc_ins_addi))
 				$display("Overflow Happened, nothing written.\n");
 			else begin
-				reg_rd = dc_reg_d;
+				reg_rd = dc_reg_t;
 				reg_rd_data = alu_result_current;
 				reg_write_en = 1;
 			end
@@ -287,6 +331,9 @@ module decoder(
 		  	// nop
 			// - can be opt by reduce this code
 		  end
+		  BREAK: begin
+		  	reg_rt = dc_smt; // to read reg.
+		  end
 		endcase
 	end
 
@@ -303,13 +350,14 @@ module decoder(
 
 	wire [5:0] dc_op;
 	
+
 	wire [4:0] dc_reg_s;
 	wire [4:0] dc_reg_t;
 	wire [4:0] dc_reg_d;
 
 	wire [4:0] dc_smt;
-
 	wire [5:0] dc_funt;
+
 
 	wire [31:0] extension_26;
 	wire [31:0] extension_signed_16;
@@ -317,13 +365,19 @@ module decoder(
 	wire [31:0] extension_high_16;
 	wire [31:0] extension_16_addr;
 
+	// pre decode
+	assign dc_op = dc_ins[31:26];
+	assign dc_funt = dc_ins[5:0];
+    assign dc_smt = dc_ins[10:6];
+    assign dc_reg_s = dc_ins[25:21];
+    assign dc_reg_t = dc_ins[20:16];
+    assign dc_reg_d = dc_ins[15:11];
+
     assign extension_26 = {{4{dc_ins[25]}}, dc_ins[25:0], 2'b00};
 	assign extension_signed_16 = {{16{dc_ins[15]}}, dc_ins[15:0]};
 	assign extension_zero_16 = {16'b0, dc_ins[15:0]};
 	assign extension_high_16 = {dc_ins[15:0], 16'b0};
     assign extension_16_addr = {{14{dc_ins[15]}}, dc_ins[15:0], 2'b00};
-
-	reg [3:0] dc_stage_next; 
 
 	// 加载
 	wire dc_ins_lb;
@@ -394,8 +448,7 @@ module decoder(
 	wire dc_ins_mthi;
 	wire dc_ins_mtlo;
 
-	// decode op
-	assign dc_op = dc_ins[31:26];
+	wire dc_ins_break;
 
 	// 加载
 	assign dc_ins_lb = dc_op == 6'b100000 ?1'b1:1'b0;
@@ -479,7 +532,7 @@ module decoder(
 		if (dc_ins_xori)
 			dc_ri_alu_op = 4'b0111;
 		if (dc_ins_lui)
-			dc_ri_alu_op = 4'b1111;
+			dc_ri_alu_op = 4'b0000;
 		if (dc_ins_slti)
 			dc_ri_alu_op = 4'b1010;
 		if (dc_ins_sltiu)
@@ -507,5 +560,8 @@ module decoder(
 	assign dc_ins_mflo = (dc_op == 6'b000000) & (dc_funt == 6'b010010) ?1'b1:1'b0;
 	assign dc_ins_mthi = (dc_op == 6'b000000) & (dc_funt == 6'b010001) ?1'b1:1'b0;
 	assign dc_ins_mtlo = (dc_op == 6'b000000) & (dc_funt == 6'b010011) ?1'b1:1'b0;
+
+	// 特权
+	assign dc_ins_break = ((dc_op == 6'b000000 & (dc_funt == 6'b001101))) ? 1'b1 : 1'b0;
 
 endmodule

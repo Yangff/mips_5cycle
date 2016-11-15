@@ -5,7 +5,8 @@ module alu(
 );
 	input [31:0] a;
 	input [31:0] b;
-	input [31:0] imm;
+	input [31:0] imm1;
+	input [31:0] imm0;
 	input [3:0] op;
 	input [1:0] mask;
 
@@ -14,7 +15,7 @@ module alu(
 
 	wire [31:0] mux_a;
 	wire [31:0] mux_b;
-	wire [32:0] c;
+	reg [32:0] c;
 
 	wire carry;
 
