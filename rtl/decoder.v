@@ -175,7 +175,7 @@ module decoder(
 			
 			if (dc_type_b) begin
 				dc_stage_next = BTYPEEX;
-				alu_mask = 2'b11; alu_imm1 = pc; alu_imm0 = extension_16_addr; alu_op = 4'b1011; // a + b - 4
+				alu_mask = 2'b11; alu_imm1 = pc; alu_imm0 = extension_16_addr; alu_op = 4'b0000; // a + b
 			end
 			if (dc_ins_j) 
 				dc_stage_next = JEX;
