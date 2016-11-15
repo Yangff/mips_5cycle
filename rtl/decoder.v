@@ -161,6 +161,10 @@ module decoder(
 		end
 		BREAK: begin
 			if (dc_ins[25:11] == 15'b0) begin
+				if (reg_rt == 0) begin
+					$display("Exit normally");
+					$finish;
+				end				
 				$display("Reg %d=%d", reg_rt, reg_rt_data);
 			end else begin
 				$display("Break due to code %d.", dc_ins[25:6]);
