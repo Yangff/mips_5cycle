@@ -75,6 +75,7 @@ module decoder(
 
 	// saved value
 	reg [31:0] alu_result_current;
+	reg [3:0] alu_flags_current;
 	reg [31:0] mem_data_current;
 
 	// comb
@@ -90,6 +91,7 @@ module decoder(
 			// init
 			mem_data_current <= 0; 
 			alu_result_current <= 0;
+			alu_flags_current <= 0;
 
 			dc_ins <= mem_data;
 			pc <= alu_result;
@@ -109,7 +111,7 @@ module decoder(
 		MEMRD: begin
 			dc_stage <= dc_stage_next;
 			mem_data_current <= mem_data;
-			$display("  Mem %x=%x %x", mem_addr, mem_data);
+			$display("  Mem[%x]=%x, goto %b", mem_addr, mem_data, dc_stage_next);
 		end
 		MEMWB: begin
 			dc_stage <= 0;
@@ -122,28 +124,31 @@ module decoder(
 		RTYPEEX: begin
 			dc_stage <= RTYPEWB;
 			alu_result_current <= alu_result;
-			$display("  Calc Result=%d", alu_result);
+			alu_flags_current <= alu_flags;
+			$display("  ALUOP=%b ALUMASK=%b Calc Result=%d", dc_rr_alu_op, alu_mask, alu_result);
+			$display("  rs=%d rt=%d", reg_rs_data, reg_rt_data);
+			$display("  aluflag = %b", alu_flags);
 		end
 		RTYPEWB: begin
 			dc_stage <= 0;
-			$display("  Written %x to RegAddr:%d", reg_rd_data, reg_rd);
+			$display("  Written(%b) %x to RegAddr:%d", alu_flags_current, reg_rd_data, reg_rd);
 		end
 		BTYPEEX: begin 
 			if (branch_happen == 1) begin
 				pc <= alu_result_current;
-				$display("  BR Taken to %x", alu_result_current);
-			end
+				$display("  BR Taken to %x (alu_flags=%b) dc_type_be=%b, dc_type_gt=%b", alu_result_current, alu_flags, dc_type_be, dc_type_gt);
+			end else $display("  BR Ignored");
 			dc_stage <= 0;
-			$display("  BR IG");
 		end
 		ITYPEEX: begin
 			dc_stage <= ITYPEWB;
 			alu_result_current <= alu_result;
-			$display("  Calc Result=%d", alu_result);
+			alu_flags_current <= alu_flags;
+			$display("  ALUOP=%b ALUMASK=%b Calc Result=%d", alu_op, alu_mask, alu_result);
 		end
 		ITYPEWB: begin
 			dc_stage <= 0;
-			$display("  Written %x to RegAddr:%d", reg_rd_data, reg_rd);
+			$display("  Written(?alu_flags:%b dc_ins_addi:%b) %x to RegAddr:%d", alu_flags, dc_ins_addi, reg_rd_data, reg_rd);
 		end
 		JWRITE: begin
 			dc_stage <= dc_stage_next;
@@ -165,11 +170,12 @@ module decoder(
 					$display("Exit normally");
 					$finish;
 				end				
-				$display("Reg %d=%d", reg_rt, reg_rt_data);
+				$display("Reg: %d", reg_rt_data);
 			end else begin
 				$display("Break due to code %d.", dc_ins[25:6]);
 				$finish;
 			end
+			dc_stage <= 0;
 		end
 		UNKNOWN: begin
 			$display("Unsupported instruction %b, or finished?", dc_ins);
@@ -271,10 +277,10 @@ module decoder(
 		  		mem_write_data = reg_rt_data;
 		  	else begin
 			  	if (dc_ins_sb) begin
-				  	by_pos = {1'b0, 1'b1, alu_result_current[1:0]};
+				  	by_pos = {2'b01, alu_result_current[1:0]};
 					mem_write_data = result_b;
 				end else begin
-					hl_pos = {1'b0, 1'b1, alu_result_current[1]};
+					hl_pos = {2'b01, alu_result_current[1]};
 					mem_write_data = result_h;
 				end
 		  	end
@@ -288,8 +294,10 @@ module decoder(
 			end else alu_mask = 2'b00;
 		  end
 		  RTYPEWB: begin
-		  	if ((alu_flags[1] | alu_flags[0]) & (dc_ins_add | dc_ins_sub))
+		  	if ((alu_flags_current[1] | alu_flags_current[0]) & (dc_ins_add | dc_ins_sub)) begin
 			  	$display("Overflow Happened, nothing written.\n");
+			  	reg_write_en = 0;
+			end
 			else begin
 				reg_rd = dc_reg_d;
 				reg_rd_data = alu_result_current;
@@ -304,8 +312,8 @@ module decoder(
 		  		branch_happen = dc_ins_bne ^ alu_flags[2]; // zf differ from bne
 			end else begin
 				alu_mask = 2'b01;
-				alu_imm0 = 0; // a - 0 
-				branch_happen = (dc_type_be & alu_flags[2]) | (dc_type_gt ^ alu_flags[3]); // gt differ from ne
+				alu_imm0 = 0; // a - 0 < 0
+				branch_happen = (dc_type_be & alu_flags[2]) | (~alu_flags[2] & (dc_type_gt ^ alu_flags[3])); // gt differ from ne
 			end
 		  end
 		  ITYPEEX: begin
@@ -314,8 +322,9 @@ module decoder(
 			alu_imm0 = dc_ri_signed_extension ? (extension_signed_16) : (dc_ri_high_extension ? extension_high_16 : extension_zero_16);
 		  end
 		  ITYPEWB: begin
-			if ((alu_flags[1] | alu_flags[0]) & (dc_ins_addi))
-				$display("Overflow Happened, nothing written.\n");
+			if ((alu_flags_current[1] | alu_flags_current[0]) & (dc_ins_addi)) begin
+				reg_write_en = 0;
+			end
 			else begin
 				reg_rd = dc_reg_t;
 				reg_rd_data = alu_result_current;
@@ -500,7 +509,7 @@ module decoder(
 		if (dc_ins_srl | dc_ins_srlv)
 			dc_rr_alu_op = 4'b0011;
 		if (dc_ins_sra | dc_ins_srav)
-			dc_rr_alu_op = 4'b0011;
+			dc_rr_alu_op = 4'b0100;
 		if (dc_ins_and)
 			dc_rr_alu_op = 4'b0101;
 		if (dc_ins_or)

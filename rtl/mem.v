@@ -9,11 +9,11 @@ module memory(clk, reset, addr, read_data, write_data, write, load);
     output [31:0] read_data;
     input [31:0] write_data;
 
-    reg [31:0] mem[0:255];
+    reg [31:0] mem[0:1024];
 
-    wire [7:0] ext_addr;
+    wire [9:0] ext_addr;
 
-    assign ext_addr = addr[9:2];
+    assign ext_addr = addr[11:2];
 
     always @(posedge reset) 
         if (load)

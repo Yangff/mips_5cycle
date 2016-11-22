@@ -13,14 +13,19 @@ module alu(
 	output [31:0] result;
 	output [3:0] flags;
 
-	wire [31:0] mux_a;
-	wire [31:0] mux_b;
+	wire [31:0] _mux_a;
+	wire [31:0] _mux_b;
+
+	wire [32:0] mux_a;
+	wire [32:0] mux_b;
 	reg [32:0] c;
 
 	wire carry;
 
-	assign mux_a = mask[1] ? imm1 : a;
-	assign mux_b = mask[0] ? imm0 : b;
+	assign _mux_a = mask[1] ? imm1 : a;
+	assign _mux_b = mask[0] ? imm0 : b;
+	assign mux_a = {_mux_a[31], _mux_a};
+	assign mux_b = {_mux_b[31], _mux_b};
 	assign result = c[31:0];
 
 	//zf of uf
@@ -36,7 +41,7 @@ module alu(
         	4'b0101: c = mux_a & mux_b;
         	4'b0110: c = mux_a | mux_b;
         	4'b0111: c = mux_a ^ mux_b;
-			4'b1000: c = mux_a ~^ mux_b;    
+			4'b1000: c = mux_a ~| mux_b;    
         	4'b1001: c = (mux_a < mux_b) ? 32'b1 : 32'b0; // sltu
         	4'b1010: c = ($signed(mux_a) < $signed(mux_b)) ? 32'b1 : 32'b0; // slt
 			4'b1011: c = mux_a + mux_b - 4;

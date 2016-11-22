@@ -9,7 +9,6 @@ module half_op(org, pos, val, result);
 	output reg [31:0] result;
 
 	always @(*) begin
-		result = 0;
 		case (pos)
 		  4'b010: result = {val, org[15:0]}; // 00 - lower memory, higher data 
 		  4'b011: result = {org[31:16], val}; 

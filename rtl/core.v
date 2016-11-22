@@ -62,7 +62,7 @@ module core;
         $display("Start");
         mem_load = 1;reset = 1; #5; reset = 0; mem_load = 0;
     end
-    always #1000 begin
-      clk = 0; #500; clk = 1; #500;
+    always #500 begin
+      clk = 0; #250; clk = 1; #250;
     end
 endmodule

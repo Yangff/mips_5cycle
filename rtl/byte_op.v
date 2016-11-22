@@ -9,7 +9,6 @@ module byte_op(org, pos, val, result);
 	output reg [31:0] result;
 
 	always @(*) begin
-		result = 0;
 		case (pos)
 		  4'b0100: result = {val, org[23:0]}; // 00 - lower memory, higher data 
 		  4'b0101: result = {org[31:24], val, org[15:0]};
