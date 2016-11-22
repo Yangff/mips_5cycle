@@ -1,0 +1,63 @@
+加载 load
+LB 加载字节 20H R[rt] = {24{Mem[GPR[rs]+sign_ext(offset)][7]},Mem[GPR[rs]+sign_ext(offset)][7:0]}
+LBU 加载字节(无符号) 24H R[rt] = {24’b0, Mem[GPR[rs]+sign_ext(offset)][7:0]}
+LH 加载半字 21H R[rt] = {16{Mem[GPR[rs]+sign_ext(offset)][15]},Mem[GPR[rs]+sign_ext(offset)][15:0]}
+LHU 加载半字(无符号) 25H R[rt] = {16’b0, Mem[GPR[rs]+sign_ext(offset)][15:0]}
+LW 加载字 23H R[rt] = Mem[GPR[rs]+sign_ext(offset)]
+
+保存 save
+SB 存储字节 28H Mem[GPR[rs]+sign_ext(offset)][7:0] = R[rt][7:0]
+SH 存储半字 29H Mem[GPR[rs]+sign_ext(offset)][15:0] = R[rt][15:0]
+SW 存储字 2BH Mem[GPR[rs]+sign_ext(offset)] = R[rt]
+
+R-R运算 r
+ADD 加 0/20H GPR[rd] = GPR[rs] + GPR[rt]
+ADDU 无符号加 0/21H GPR[rd] = GPR[rs] + GPR[rt]
+SUB 减 0/22H GPR[rd] = GPR[rs] - GPR[rt]
+SUBU 无符号减 0/23H GPR[rd] = GPR[rs] - GPR[rt]
+# MULT 乘 0/18H ｛HI, LO｝ = GPR[rs] * GPR[rt]
+# MULTU 乘(无符号) 0/19H ｛HI, LO｝ = GPR[rs] * GPR[rt]
+# DIV 除 0/1AH ｛HI, LO｝ = GPR[rs] / GPR[rt]
+# DIVU 除(无符号) 0/1BH ｛HI, LO｝ = GPR[rs] / GPR[rt]
+SLT 小于置1 0/2AH GPR[rd] = (GPR[rs] < GPR[rt]) ? 1:0
+SLTU 小于置1(无符号) 0/2BH GPR[rd] = (GPR[rs] < GPR[rt]) ? 1:0
+SLL 逻辑左移 0/0H GPR[rd] = {GPR[rt][31-s:0], s{0}}
+SRL 逻辑右移 0/2H GPR[rd] = {s{0}, GPR[rt][31:s]}
+SRA 算术右移 0/3H GPR[rd] = {s{GPR[rt][31]}, GPR[rt][31:s]}
+SLLV 逻辑可变左移 0/4H GPR[rd] = {GPR[rt][31-v:0], v{0}}
+SRLV 逻辑可变右移 0/6H GPR[rd] = {v{0}, GPR[rt][31:v]}
+SRAV 算术可变右移 0/7H GPR[rd] = {v{GPR[rt][31]}, GPR[rt][31:v]}
+AND 与 0/24H GPR[rd] = GPR[rs] & GPR[rt]
+OR 或 0/25H GPR[rd] = GPR[rs] | GPR[rt]
+XOR 异或 0/26H GPR[rd] = GPR[rs] ^ GPR[rt]
+NOR 或非 0/27H GPR[rd] = ~(GPR[rs] | GPR[rt])
+
+R-I运算 i
+ADDI 加立即数 8H GPR[rt] = GPR[rs] + SignExt(Imm)
+ADDIU 加立即数(无符号) 9H GPR[rt] = GPR[rs] + SignExt(Imm)
+ANDI 与立即数 CH GPR[rt] = GPR[rs] & ZeroExt(Imm)
+ORI 或立即数 DH GPR[rt] = GPR[rs] | ZeroExt(Imm)
+XORI 异或立即数 EH GPR[rt] = GPR[rs] ^ ZeroExt(Imm)
+LUI 立即数加载至高位 FH GPR[rt] = {imm, 16’b0}
+SLTI 小于立即数置1 AH GPR[rt] = (GPR[rs] < SignExt(Imm)) ? 1 : 0
+SLTIU 小于立即数置1(无符号) BH GPR[rt] = (GPR[rs] < SignExt(Imm)) ? 1 : 0
+
+分支 b
+BEQ 等于转移 4H if (GPR[rs] == GPR[rt]) PC = PC + 4 + BranchAddr
+BNE 不等转移 5H if (GPR[rs] != GPR[rt]) PC = PC + 4 + BranchAddr
+BLEZ 小于等于0转移 6H if (GPR[rs] <= 0) PC = PC + 4 + BranchAddr
+BGTZ 大于0转移 7H if (GPR[rs] > 0) PC = PC + 4 + BranchAddr
+BLTZ 小于0转移 SP1 if (GPR[rs] <0) PC = PC + 4 + BranchAddr
+BGEZ 大于等于0转移 SP2 if (GPR[rs] >= 0) PC = PC + 4 + BranchAddr
+
+跳转 jump
+J 跳转 2H PC = JumpAddr
+JAL 跳转并链接 3H PC = JumpAddr; GPR[31] = PC + 4
+JALR 跳转并链接寄存器 0/9H PC = GPR[rs]; GPR[rd] = PC + 4
+JR 跳转寄存器 0/8H PC = GPR[rs]
+
+传输 pass
+MFHI 读HI寄存器 0/10H GPR[rd] = HI
+MFLO 读LO寄存器 0/12H GPR[rd] = LO
+MTHI 写HI寄存器 0/11H HI = GPR[rs]
+MTLO 写LO寄存器 0/13H LO = GPR[rs]
